@@ -1,5 +1,5 @@
 CXX = nvcc
-CXX_FLAGS = -g -O3 -arch=sm_21
+CXX_FLAGS = -g -O3 -arch=sm_89
 CXX_LIBS = 
 BIN = md5_gpu
 
