@@ -13,11 +13,11 @@ test_hash = "2a21e2561359ebf2fb2d634ee7837a8e"
 test_string = "Nvidia"
 
 valid_chars = "abcdefghijklmnopqrstuvwxyz"
-valid_chars += vaild_chars.upper()
+valid_chars += valid_chars.upper()
 valid_chars += "0123456789_"
 byte_possibilities = [set() for i in range(8)]
 
-for char in vaild_chars:
+for char in valid_chars:
     # Convert to byte
     char_byte = char.encode('ascii')
     for bit_index in range(8):
@@ -214,34 +214,74 @@ tests = ((a | c) & b) & (c | False)
 tests.cnf()._simplify()
 
 class BStream:
-    def __init__(self, size, form=None):
-        
-        self.size = size
+    def __init__(self, size=8, form=None):
         self.form = [BitSymbol() for i in range(size)] if not form else form # For every bit in the bit string, store the operation perform.
         # If this is a const, life is good. If not then we need to make a "new symbol"
 
     def __and__(self, other):
-        new_form = [None] * self.size
+        new_form = None
         if isinstance(other, int):
+            new_size = min(2**math.ceil(math.log2(other)), len(self.form))
+            new_form = [None] * new_size
+
             # Convert other to binrary
-            other = [(other & (0b1<<i)) >> i for i in range(2**(math.ceil(math.log2(other))))]
+            other = [(other & (0b1<<i)) >> i for i in range(new_size)]
+            
             for (i, bit) in enumerate(other):
                 new_form[i] = self.form[i] & bool(bit)
         elif isinstance(other, BStream):
-            for (i, bit) in enumerate(other.form):
+            new_size = min(len(other.form), len(self.form))
+            new_form = [None] * new_size
+
+            for (i, bit) in enumerate(other.form[:new_size]):
                 new_form[i] = self.form[i] & bit
         else:
             raise Exception(f'Unable to and {other}, and BStream')
 
-        return BStream(self.size, form=new_form)
+        return BStream(len(new_form), form=new_form)
+
+    def __or__(self, other):
+        new_form = None
+        if isinstance(other, int):
+            new_size = max(2**math.ceil(math.log2(other)), len(self.form))
+            new_form = [None] * new_size
+
+            # Convert other to binrary
+            other = [(other & (0b1<<i)) >> i for i in range(new_size)]
+
+            for (i, bit) in enumerate(other):
+                new_form[i] = self.form[i] | bool(bit)
+        elif isinstance(other, BStream):
+            new_size = max(len(other.form), len(self.form))
+            new_form = [None] * new_size
+
+            for i in range(new_size):
+                other_bit = other.form[i] if i < len(other.form) else BConst(False)
+                self_bit = self.form[i] if i < len(self.form) else BConst(False)
+                new_form[i] = self_bit | other_bit
+        else:
+            raise Exception(f'Unable to and {other}, and BStream')
+
+        return BStream(len(new_form), form=new_form)
+
+    def __lshift__(self, other):
+        new_form = [a for a in self.form]
+
+        for i in range(other):
+            new_form.insert(0, BConst(False))
+        return BStream(len(self.form) + other, new_form)
+
+    def __rshift__(self, other):
+        new_form = [a for a in self.form]
+
+        for i in range(other):
+            new_form.append(BConst(False))
+        return BStream(len(self.form) + other, new_form)
 
     def simplify(self):
-        return BStream(self.size, form=[a.simplify() for a in self.form])
-        
-a = BStream(8)
-b = BStream(8)
-
-((a & b) & 8).simplify().form
+        new_form = [a.simplify() for a in self.form]
+        new_form = [a for a in new_form if not (isinstance(a, BConst) and a.value == False)]
+        return BStream(form=new_form)
 
 # Thank you: https://github.com/Utkarsh87/md5-hashing/blob/master/md5.py
 import math
@@ -284,15 +324,24 @@ init_MDBuffer = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476]
 
 # UTILITY/HELPER FUNCTION:
 def leftRotate(x, amount):
-	x &= 0xFFFFFFFF
-	return (x << amount | x >> (32-amount)) & 0xFFFFFFFF
+    x &= 0xFFFFFFFF
+    return (x << amount | x >> (32-amount)) & 0xFFFFFFFF
 
+a = BStream(8)
+a.form
+leftRotate(a, 3).simplify().form
+pad([a])
 
 # STEP 4: process the message in 16-word blocks
 # Message block stored in buffers is processed in the follg general manner:
 # A = B + rotate left by some amount<-(A + func(B, C, D) + additive constant + 1 of the 16 32-bit(4 byte) blocks converted to int form)
 
+def from_little_bytes(bytes):
+    flipped = list(reverse(bytes))
+    proper = 
+
 def processMessage(msg):
+    
 	init_temp = init_MDBuffer[:] # create copy of the buffer init constants to preserve them for when message has multiple 512-bit blocks
 	
 	# message length is a multiple of 512bits, but the processing is to be done separately for every 512-bit block.
@@ -327,7 +376,7 @@ def processMessage(msg):
 			F = func(B, C, D) # operate on MD Buffers B, C, D
 			G = index_func(i) # select one of the 32-bit words from the 512-bit block of the original message to operate on.
 
-			to_rotate = A + F + constants[i] + int.from_bytes(block[4*G : 4*G + 4], byteorder='little')
+			to_rotate = A + F + constants[i] + from_little_bytes(block[4*G : 4*G + 4], byteorder='little')
 			newB = (B + leftRotate(to_rotate, rotate_by[i])) & 0xFFFFFFFF
 				
 			A, B, C, D = D, newB, B, C
@@ -349,12 +398,10 @@ def processMessage(msg):
 
 def MD_to_hex(digest):
 	# takes MD from the processing stage, change its endian-ness and return it as 128-bit hex hash
-	raw = digest.to_bytes(16, byteorder='little')
-	return '{:032x}'.format(int.from_bytes(raw, byteorder='big'))
+	return digest
 
 
 def md5(msg):
-	msg = bytearray(msg, 'ascii') # create a copy of the original message in form of a sequence of integers [0, 256)
 	msg = pad(msg)
 	processed_msg = processMessage(msg)
 	# processed_msg contains the integer value of the hash
@@ -364,4 +411,4 @@ def md5(msg):
 
 if __name__ == '__main__':
 	message = input()
-	md5(message)
+	md5([BStream(8 * 8)])
